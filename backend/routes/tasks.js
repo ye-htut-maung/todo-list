@@ -1,109 +1,145 @@
 import express from "express";
 
-const router = express.Router();
+const tasksRoutes = (pool) => {
+  const router = express.Router();
 
-let tasks = [
-  {
-    id: 1,
-    user_id: 1,
-    title: "Todo 1",
-    description: "This is to do",
-    status: "incomplete",
-  },
-  {
-    id: 2,
-    user_id: 2,
-    title: "Todo 2",
-    description: "This is to do 2",
-    status: "completed",
-  },
-];
+  // Create a task
+  router.post("/", async (req, res) => {
+    const { userId, title, description } = req.body;
 
-// Create a task
-router.post("/", (req, res) => {
-  const newTask = {
-    id: tasks.length + 1,
-    title: req.body.title,
-    description: req.body.description,
-    status: "incomplete",
-  };
+    if (!title || !userId) {
+      return res.status(400).json({ error: "User ID and title are required" });
+    }
+    try {
+      const query = `
+        INSERT INTO tasks (user_id, title, description, status) 
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+        `;
+      const values = [userId, title, description || null, "incomplete"];
+      const result = await pool.query(query, values);
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error adding task: ", err.message);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
-  if (!newTask.title || !newTask.status) {
-    return res.status(400).json({ msg: "Please include title or status" });
-  }
+  // Get all tasks
+  router.get("/", async (req, res) => {
+    const status = req.query.status;
 
-  tasks.push(newTask);
-  res.status(201).json(tasks);
-});
+    try {
+      const query = `
+      SELECT * 
+      FROM tasks
+      ${status ? " WHERE status = $1" : ""}`;
 
-// Get all tasks
-router.get("/", (req, res) => {
-  const status = req.query.status;
+      const values = status ? [status] : [];
 
-  if (status == "incomplete") {
-    return res
-      .status(200)
-      .json(tasks.filter((task) => task.status === "incomplete"));
-  }
-  if (status == "completed") {
-    return res
-      .status(200)
-      .json(tasks.filter((task) => task.status === "completed"));
-  }
-  res.status(200).json(tasks);
-});
+      const result = await pool.query(query, values);
+      res.status(200).json(result.rows);
+    } catch (err) {
+      console.error("Error fetching tasks: ", err.message);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
-// Get task by id
-router.get("/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const task = tasks.find((task) => task.id === id);
+  // Get task by id
+  router.get("/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid task ID" });
+    }
 
-  if (!task) {
-    return res
-      .status(404)
-      .json({ msg: `A task with the id of ${id} was not found` });
-  }
-  res.status(200).json(task);
-});
+    try {
+      const result = await pool.query("SELECT * FROM tasks WHERE id = $1", [
+        id,
+      ]);
 
-// Update a task's status or details
-router.patch("/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const task = tasks.find((post) => post.id === id);
+      if (result.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ msg: `A task with the id of ${id} was not found` });
+      }
 
-  if (!task) {
-    return res
-      .status(404)
-      .json({ msg: `A task with the id of ${id} was not found` });
-  }
+      res.status(200).json(result.rows[0]);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
-  if (req.body.title) {
-    task.title = req.body.title;
-  }
+  // Update a task's status or details
+  router.patch("/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { title, description, status } = req.body;
 
-  if (req.body.description) {
-    task.description = req.body.description;
-  }
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid task ID" });
+    }
 
-  if (req.body.status) {
-    task.status = req.body.status;
-  }
+    if (!title && !description && !status) {
+      return res.status(400).json({ error: "No update fields provided" });
+    }
 
-  res.status(200).json(tasks);
-});
+    if (status && !["completed", "incomplete"].includes(status)) {
+      return res.status(400).json({
+        error:
+          "Invalid status value. Allowed values are 'completed' and 'incomplete'.",
+      });
+    }
 
-// Delete task
-router.delete("/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const task = tasks.find((post) => post.id === id);
+    try {
+      const query = `
+        UPDATE tasks
+        SET title = COALESCE($1, title),
+            description = COALESCE($2, description),
+            status = COALESCE($3, status),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4
+        RETURNING *;
+      `;
+      const values = [title, description, status, id];
+      const result = await pool.query(query, values);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: `Task with ID ${id} not found` });
+      }
+      res.status(200).json(result.rows[0]);
+    } catch (err) {
+      console.error("Error updating task:", err.message);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
 
-  if (!task) {
-    return res
-      .status(404)
-      .json({ msg: `A task with the id of ${id} was not found` });
-  }
-  tasks = tasks.filter((task) => task.id !== id);
-  res.status(200).json(tasks);
-});
+  // Delete task
+  router.delete("/:id", async (req, res) => {
+    const id = parseInt(req.params.id, 10);
 
-export default router;
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid task ID" });
+    }
+
+    try {
+      const result = await pool.query(
+        "DELETE FROM tasks WHERE id = $1 RETURNING *",
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: `Task with ID ${id} not found` });
+      }
+
+      res
+        .status(200)
+        .json({ message: "Task deleted successfully", task: result.rows[0] });
+    } catch (err) {
+      console.error("Error deleting task:", err.message);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  return router;
+};
+
+export default tasksRoutes;

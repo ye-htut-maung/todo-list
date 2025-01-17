@@ -1,9 +1,23 @@
 import express from "express";
-import tasks from "./routes/tasks.js";
+import dotenv from "dotenv";
+import pkg from "pg";
+import tasksRoutes from "./routes/tasks.js";
+
+const { Pool } = pkg;
+
+dotenv.config();
 
 const port = process.env.PORT || 8000;
 
 const app = express();
+
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_DATABASE,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+});
 
 // Body parser middleware
 app.use(express.json());
@@ -12,6 +26,6 @@ app.use(express.urlencoded({ extended: false }));
 // User Authentication
 
 // Task Management Routes
-app.use("/api/tasks", tasks);
+app.use("/api/tasks", tasksRoutes(pool));
 
 app.listen(port, () => console.log(`Server is running on port ${port}`));
