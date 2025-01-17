@@ -1,7 +1,11 @@
 import express from "express";
+import { authenticateToken } from "../middleware/auth.js";
 
 const tasksRoutes = (pool) => {
   const router = express.Router();
+
+  // Protect all routes with authenticateToken
+  router.use(authenticateToken);
 
   // Create a task
   router.post("/", async (req, res) => {

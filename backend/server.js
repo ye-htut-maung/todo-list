@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import pkg from "pg";
 import tasksRoutes from "./routes/tasks.js";
+import usersRoutes from "./routes/users.js";
 
 const { Pool } = pkg;
 
@@ -23,7 +24,8 @@ const pool = new Pool({
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// User Authentication
+// User Route
+app.use("/api/users", usersRoutes(pool));
 
 // Task Management Routes
 app.use("/api/tasks", tasksRoutes(pool));
